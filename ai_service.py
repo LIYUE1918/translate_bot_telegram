@@ -3,7 +3,7 @@
 职责：
 - 统一封装对 302.AI 的调用（兼容 OpenAI Chat Completions 格式）
 - 提供简单的内存缓存与限流策略，避免频繁请求与滥用
-- 面向上层的高阶能力：翻译、学习进度总结
+- 面向上层的高阶能力：翻译、学习进度总结、难词提取、计划生成
 
 环境变量：
 - AI_API_KEY：访问 302.AI 的密钥（从 .env 或系统环境变量读取）
@@ -15,7 +15,7 @@ import json
 import time
 from datetime import datetime
 import logging
-from database import log_ai_interaction, get_learning_stats
+from database import log_ai_interaction, get_learning_stats, get_recent_learning_logs
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -119,7 +119,7 @@ def set_cache_response(query, response):
     query_hash = hash(query)
     _CACHE[query_hash] = (response, time.time())
 
-async def get_ai_response(user_id, query, system_prompt="You are a helpful language learning assistant.", model=DEFAULT_MODEL):
+async def get_ai_response(user_id, query, system_prompt="You are a helpful language learning assistant.", model=DEFAULT_MODEL, temperature=0.7):
     """通用对话接口封装
 
     - 做限流校验
@@ -137,7 +137,7 @@ async def get_ai_response(user_id, query, system_prompt="You are a helpful langu
         {"role": "user", "content": query}
     ]
     
-    response = await call_ai_api(messages, model=model)
+    response = await call_ai_api(messages, model=model, temperature=temperature)
     
     # Log interaction
     log_ai_interaction(user_id, query, response, model)
@@ -159,6 +159,7 @@ async def summarize_learning_progress(user_id, days=7):
     count, mastery = stats if stats else (0, 0)
     
     prompt = f"""
+    use chinese language to write the summary   
     Please analyze the user's learning progress for the last {days} days.
     - Words reviewed: {count}
     - Average mastery level: {mastery:.2f} (scale 0-1)
@@ -178,3 +179,94 @@ async def ai_translate(text, target_lang="zh", model=DEFAULT_MODEL):
     prompt = f"Translate the following text to {target_lang}. Only provide the translation, no explanations.\n\nText: {text}"
     # Use a simpler system prompt for translation
     return await get_ai_response(0, prompt, system_prompt="You are a professional translator.", model=model)
+
+async def extract_difficult_words(text, min_level=6, max_new_words=50):
+    """提取难词
+    
+    1. 接收一段文本
+    2. 调用 AI 模型返回“复杂词汇列表”（≥CET-6、雅思 7 分、专八等标准）。
+    3. 返回 JSON 格式的列表
+    """
+    prompt = f"""
+    Identify difficult words (>= CET-6/IELTS 7/GRE level) from the text below.
+    Exclude simple words. 
+    Return a JSON list of objects with fields: 'word', 'phonetic', 'definition' (in Chinese), 'difficulty' (integer 1-10).
+    Max {max_new_words} words.
+    
+    Text:
+    {text}
+    
+    Format:
+    [
+      {{"word": "example", "phonetic": "/.../", "definition": "...", "difficulty": 8}},
+      ...
+    ]
+    Only return the JSON.
+    """
+    
+    response = await get_ai_response(0, prompt, system_prompt="You are a vocabulary expert.", temperature=0.3)
+    try:
+        # Try to parse JSON from response
+        # AI might wrap in ```json ... ```
+        clean_resp = response.replace("```json", "").replace("```", "").strip()
+        words = json.loads(clean_resp)
+        if isinstance(words, list):
+            return words, response # Return raw response too for audit logs if needed
+        else:
+            return [], response
+    except Exception as e:
+        logger.error(f"Failed to parse difficult words: {e}")
+        return [], response
+
+async def generate_learning_plan(user_id):
+    """生成 7 日学习计划
+    
+    1. 读取用户近 30 天学习日志（单词、正确率、复习间隔、耗时）。
+    2. 调用 AI 模型，输入上述指标，输出未来 7 天每日任务：新词量、复习量、预计时长、重点词根。
+    """
+    logs = get_recent_learning_logs(user_id, days=30)
+    # log format: (date, count, avg_mastery)
+    
+    log_summary = "\n".join([f"Date: {l[0]}, Reviewed: {l[1]}, Mastery: {l[2]:.2f}" for l in logs])
+    
+    prompt = f"""
+    Based on the user's learning history (last 30 days):
+    {log_summary}
+    
+    Create a 7-day study plan (Day 1 to Day 7).
+    For each day, provide:
+    - new_words_count (int)
+    - review_count (int)
+    - estimated_minutes (int)
+    - focus_topic (string, e.g. "Root: struct", "Topic: Technology")
+    
+    Return purely JSON format:
+    {{
+      "days": [
+        {{"day": 1, "new_words": 10, "review": 20, "minutes": 15, "focus": "..."}},
+        ...
+      ]
+    }}
+    """
+    
+    response = await get_ai_response(user_id, prompt, system_prompt="You are a study planner.", temperature=0.5)
+    try:
+        clean_resp = response.replace("```json", "").replace("```", "").strip()
+        plan = json.loads(clean_resp)
+        return plan
+    except Exception as e:
+        logger.error(f"Failed to parse plan: {e}")
+        return None
+
+async def generate_words_custom(count, source="system", level_filter="CET-6"):
+    """自定义生成单词
+    """
+    prompt = f"""
+    Generate {count} English words for a learner.
+    Source/Topic: {source}
+    Difficulty Level: {level_filter}
+    
+    Format: Word | Phonetic | Definition (Chinese)
+    One per line.
+    """
+    return await get_ai_response(0, prompt, temperature=0.7)

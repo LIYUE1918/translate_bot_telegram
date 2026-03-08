@@ -6,14 +6,19 @@
 
 业务逻辑已拆分至 handlers/ 目录下的子模块中。
 """
+import logging
 import os
 import asyncio
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 import database as db
+from logger_config import setup_logger
+
+# 初始化 Logger
+logger = setup_logger("Main")
 
 # 导入拆分后的处理器
-from handlers.basic_handlers import start, echo
+from handlers.basic_handlers import start, echo, cut_command
 from handlers.settings_handlers import (
     settings, 
     setlang, 
@@ -25,6 +30,10 @@ from handlers.learning_handlers import (
     daily_command, 
     review_command, 
     summary_command, 
+    plan_command,
+    stats_command,
+    words_command,
+    import_command,
     on_vocab_callback
 )
 
@@ -49,19 +58,24 @@ async def main():
     
     # 注册基础命令
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("cut", cut_command))
     
     # 注册设置相关命令与回调
     app.add_handler(CommandHandler("settings", settings))
     app.add_handler(CommandHandler("setlang", setlang))
     app.add_handler(CommandHandler("setmode", setmode))
     app.add_handler(CommandHandler("setcount", setcount))
-    app.add_handler(CallbackQueryHandler(on_settings_callback, pattern="^(set_src|set_tgt|set_engine|toggle_count)"))
+    app.add_handler(CallbackQueryHandler(on_settings_callback, pattern="^(set_src|set_tgt|set_engine|toggle_engine|toggle_count|toggle_cut)"))
     
     # 注册学习相关命令与回调
     app.add_handler(CommandHandler("daily", daily_command))
     app.add_handler(CommandHandler("review", review_command))
     app.add_handler(CommandHandler("summary", summary_command))
-    app.add_handler(CallbackQueryHandler(on_vocab_callback, pattern="^(add_vocab|review:)"))
+    app.add_handler(CommandHandler("plan", plan_command))
+    app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("words", words_command))
+    app.add_handler(CommandHandler("import", import_command))
+    app.add_handler(CallbackQueryHandler(on_vocab_callback, pattern="^(add_vocab|close_keyboard|review:|words_page:)"))
     
     # 注册文本消息处理器（最后注册，避免拦截命令）
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
@@ -69,7 +83,7 @@ async def main():
     # 初始化与启动
     await app.initialize()
     await app.start()
-    print("Bot started. Press Ctrl+C to stop.")
+    logger.info("Bot started. Press Ctrl+C to stop.")
     
     # 启动长轮询
     await app.updater.start_polling()
@@ -80,4 +94,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        print("Bot stopped.")
+        logger.info("Bot stopped.")
