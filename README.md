@@ -52,11 +52,35 @@ pip install -r requirements.txt
 ```
 
 3. **配置环境变量**
-创建 `.env` 文件：
-```env
-BOT_TOKEN=你的Telegram机器人Token
-AI_API_KEY=你的302.AI API Key
+```bash
+# 复制示例配置文件
+cp .env.example .env
+
+# 编辑 .env 文件，填入您的实际密钥
+# 使用文本编辑器编辑 .env 文件
 ```
+
+编辑 `.env` 文件，填入以下内容：
+```env
+# Telegram Bot Token - 从 @BotFather 获取
+BOT_TOKEN=你的Telegram机器人Token
+
+# 302.AI API Key - 从 https://302.ai 获取
+AI_API_KEY=你的302.AI API Key
+
+# 可选配置
+# DB_FILE=vocab_learning.db
+# LOG_LEVEL=INFO
+```
+
+📝 **获取密钥教程**：
+- **Telegram Bot Token**: 访问 [@BotFather](https://t.me/BotFather)，创建新机器人，获取 Token
+- **302.AI API Key**: 注册 [302.AI](https://302.ai) 账号，在控制台获取 API Key
+
+⚠️ **重要安全提示**: 
+- 切勿将 `.env` 文件提交到 Git
+- 已将 `.env` 添加到 `.gitignore` 进行保护
+- 如果密钥泄露，请立即重新生成
 
 4. **启动机器人**
 ```bash
