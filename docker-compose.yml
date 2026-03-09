@@ -1,0 +1,17 @@
+services:
+  bot:
+    build: .
+    container_name: vocab_bot
+    volumes:
+      # 挂载数据库文件以持久化数据
+      # 注意：宿主机必须存在 vocab_learning.db 文件，否则 Docker 会创建一个同名目录导致报错
+      - ./vocab_learning.db:/app/vocab_learning.db
+      # 挂载日志目录
+      - ./logs:/app/logs
+    environment:
+      - TZ=Asia/Shanghai
+      # 如果需要修改数据库路径，可以设置 DB_FILE 环境变量
+      # - DB_FILE=/app/data/vocab.db
+    env_file:
+      - .env
+    restart: unless-stopped

@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+*.pyo
+.env
+logs/
+.git/
+.gitignore
+vocab_learning.db
+vocab_learning.db-journal
+docs/

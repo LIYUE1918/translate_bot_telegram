@@ -12,10 +12,11 @@ import sqlite3
 import json
 import time
 import hashlib
+import os
 from datetime import datetime, timedelta
 from logger_config import logger
 
-DB_FILE = "vocab_learning.db"
+DB_FILE = os.getenv("DB_FILE", "vocab_learning.db")
 
 def get_connection():
     """获取数据库连接（连接到项目根目录下的 DB_FILE）"""
