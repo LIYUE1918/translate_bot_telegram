@@ -275,19 +275,22 @@ async def fuzzy_match_word(word, max_candidates=5):
     prompt = f"""
     You are an English spell-correction assistant.
     Input: "{word}"
+    
+    Rules:
+    1. If the input is a valid English word (including slang, proper nouns, inflected forms), set "is_valid": true.
+    2. If it's likely a typo, set "is_valid": false and provide the best corrections.
+    3. If "is_valid" is true, provide its primary Chinese translation in "cn".
+    4. Ensure candidates are UNIQUE and do not include the input or the "best" word.
+    
     Return strict JSON:
     {{
       "input": "{word}",
-      "best": {{"word": "...", "confidence": 0.0, "pos": "..."}},
+      "is_valid": true/false,
+      "best": {{"word": "...", "confidence": 0.0, "cn": "..."}},
       "candidates": [
-        {{"word": "...", "confidence": 0.0, "pos": "..."}}
+        {{"word": "...", "confidence": 0.0}}
       ]
     }}
-    Rules:
-    - Confidence is 0-1.
-    - Include up to {max_candidates} candidates sorted by confidence desc.
-    - Treat inflected forms (past tense, -ed, -ing, plural) as valid, not errors.
-    - If input is valid word, set best.word=input with high confidence and candidates possibly empty.
     Only output JSON.
     """
     resp = await get_ai_response(0, prompt, system_prompt="You correct spelling and return JSON.", temperature=0.0)
@@ -296,7 +299,7 @@ async def fuzzy_match_word(word, max_candidates=5):
         data = json.loads(clean)
         return data
     except Exception:
-        return {"input": word, "best": {"word": word, "confidence": 0.99, "pos": ""}, "candidates": []}
+        return {"input": word, "is_valid": True, "best": {"word": word, "confidence": 0.99, "cn": ""}, "candidates": []}
 
 async def get_word_detail(word):
     prompt = f"""
@@ -331,13 +334,20 @@ async def get_word_detail(word):
 async def chat_word(user_id, text):
     prompt = f"""
     User asks about: {text}
+    
+    Instructions:
+    1. If the input is Chinese, explain it directly WITHOUT Pinyin.
+    2. Do NOT use markdown bold syntax (**text**). Use headers like 【Memory】, 【Examples】, 【Root】 or emojis to structure the response.
+    3. Format the output clearly and friendly.
+
     Provide:
-    - Memory techniques tailored to the word
-    - 2 concise example sentences (EN) with Chinese translations
-    - Root and affix analysis
-    Keep under 120 words.
+    - Memory techniques or cultural context (if applicable)
+    - 2 concise example sentences (EN/CN)
+    - Root/affix analysis (if applicable)
+    
+    Keep under 150 words.
     """
-    return await get_ai_response(user_id, prompt, system_prompt="You are a concise vocabulary tutor.", model=DEFAULT_MODEL, temperature=0.5)
+    return await get_ai_response(user_id, prompt, system_prompt="You are a helpful vocabulary tutor.", model=DEFAULT_MODEL, temperature=0.7)
 
 async def get_ipa(word):
     async def cambridge_ipa(w, accent):

@@ -45,20 +45,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "你好！我是你的 Telegram 翻译机器人。\n"
+        "👋 你好！我是你的 Telegram 翻译机器人。\n"
         "你可以直接发送消息进行翻译。\n\n"
-        "📚 **学习功能**：\n"
+        "📚 【学习功能】\n"
         "/daily - 获取今日学习词汇\n"
         "/review - 开始复习生词\n"
-        "/words - 查看历史单词\n"
+        "/words - 查看单词本与详细统计\n"
         "/plan - 查看学习计划\n"
         "/summary - 查看学习进度总结\n"
+        "/detail [word] - 查看单词详情\n"
         "/cut [text] - 切分句子为单词按钮\n"
         "/import [text] - 智能提取重点词汇\n\n"
-        "⚙️ **设置**：\n"
+        "💬 【AI 助手】\n"
+        "/chat [内容] - 询问单词记忆法、例句等\n\n"
+        "⚙️ 【设置】\n"
         "/settings - 打开详细设置面板\n"
         "(包含：语言、引擎、计时开关、自动切词)\n\n"
-        "提示：在翻译结果下点击按钮可将单词加入生词本。"
+        "💡 提示：在翻译结果下点击按钮可将单词加入生词本。"
     )
 
 import database as db
@@ -96,6 +99,11 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"🔒 请输入访问密钥（剩余机会：{5-attempts} 次）：")
             return
 
+    await process_translation(update, context, text)
+
+async def process_translation(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+    """核心翻译逻辑，可由 echo 或回调函数调用"""
+    user_id = update.effective_user.id
     src = context.user_data.get("translate_src", DEFAULT_SRC)
     tgt = context.user_data.get("translate_tgt", context.user_data.get("translate_lang", DEFAULT_TGT))
     engine = context.user_data.get("translate_mode", DEFAULT_MODE)
@@ -104,7 +112,8 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         tokens = re.findall(r'^[a-zA-Z\-]+$', text.strip())
-        if tokens and len(tokens) == 1:
+        # 仅当引擎为 deepseek_fuzzy 且输入为单个英文单词时，才启用模糊匹配（拼写纠错）
+        if engine == "deepseek_fuzzy" and tokens and len(tokens) == 1:
             word = tokens[0]
             vocab = db.get_vocab_by_word(word)
             if not vocab:
@@ -114,26 +123,43 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     fm = await ai_service.fuzzy_match_word(word)
                     best = fm.get("best", {})
-                    cands = fm.get("candidates", []) or []
-                    items = [best] + cands
-                    buttons = []
-                    rows = []
-                    for item in items[:5]:
-                        w = item.get("word") or word
-                        rows.append(InlineKeyboardButton(f"{w}", callback_data=f"corr:{w}"))
-                        if len(rows) == 3:
+                    
+                    # 如果 AI 确认单词本身有效且置信度高，直接跳过建议界面进行翻译
+                    if fm.get("is_valid") and best.get("confidence", 0) >= 0.95 and best.get("word", "").lower() == word.lower():
+                        pass 
+                    else:
+                        # 去重处理，避免出现多个相同的建议
+                        seen = {best.get("word", "").lower()}
+                        items = [best]
+                        for c in (fm.get("candidates", []) or []):
+                            w_val = c.get("word", "").lower()
+                            if w_val and w_val not in seen:
+                                items.append(c)
+                                seen.add(w_val)
+
+                        buttons = []
+                        rows = []
+                        for item in items[:5]:
+                            w = item.get("word") or word
+                            rows.append(InlineKeyboardButton(f"{w}", callback_data=f"corr:{w}"))
+                            if len(rows) == 3:
+                                buttons.append(rows)
+                                rows = []
+                        if rows:
                             buttons.append(rows)
-                            rows = []
-                    if rows:
-                        buttons.append(rows)
-                    msg = "您输入的单词： " + word + "\n是否想查找：\n"
-                    for i, item in enumerate(items[:5], start=1):
-                        pct = int((item.get("confidence") or 0) * 100)
-                        msg += f"• {item.get('word')} ({pct}% 匹配)\n"
-                    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons))
-                    return
+                        
+                        msg = "您输入的单词： " + word + "\n是否想查找：\n"
+                        for i, item in enumerate(items[:5], start=1):
+                            pct = int((item.get("confidence") or 0) * 100)
+                            msg += f"• {item.get('word')} ({pct}% 匹配)\n"
+                        
+                        if update.callback_query:
+                            await update.callback_query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons))
+                        else:
+                            await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons))
+                        return
         start_time = time.perf_counter()
-        if engine == "deepseek":
+        if engine in ("deepseek", "deepseek_fuzzy"):
             res = await ai_service.ai_translate(text, target_lang=tgt)
         elif engine == "google":
             res = ts.translate_text(text, from_language=src, to_language=tgt)
@@ -147,42 +173,41 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = None
         
-        # 自动切词逻辑：
-        # 如果 auto_cut 开启，或者用户显式调用 /cut（虽然这是 echo，但逻辑可以复用）
-        # 优化逻辑：优先切分英文内容（无论是源文还是译文）
-        
+        # 自动切词逻辑
         target_is_en = (tgt == "en")
-        source_is_en = (src == "en") or (len(text.split()) > 0 and text.isascii()) # 简单判断源文是否英文
+        source_is_en = (src == "en") or (len(text.split()) > 0 and text.isascii())
         result_is_en = (len(res.split()) > 0 and res.isascii())
 
-        # 确定潜在的英文文本
         english_text = None
         if target_is_en or result_is_en:
             english_text = res
         elif source_is_en:
             english_text = text
             
-        keyboard = None
         if auto_cut and english_text:
             keyboard = _generate_word_buttons(english_text)
         else:
-            # 只有当翻译结果是英文，或者原句是英文时，才显示“添加整句”按钮
             if english_text:
-                # 只有比较短的才显示添加整句，太长的句子建议用 /cut
                 if len(english_text.split()) <= 10:
                     keyboard = InlineKeyboardMarkup([[
                         InlineKeyboardButton(f"Add '{english_text}' to Vocabulary", callback_data=f"add_vocab:{english_text}")
                     ]])
             
-        await update.message.reply_text(msg, reply_markup=keyboard)
+        if update.callback_query:
+            await update.callback_query.message.reply_text(msg, reply_markup=keyboard)
+        else:
+            await update.message.reply_text(msg, reply_markup=keyboard)
         
-        # AI 难词筛选机制 (异步执行，不阻塞翻译返回)
+        # AI 难词筛选机制
         if english_text and len(english_text.split()) > 3:
-             # 使用 asyncio.create_task 在后台运行，不等待结果
             asyncio.create_task(_process_difficult_words(user_id, english_text, update))
             
     except Exception as e:
-        await update.message.reply_text(f"翻译失败，请稍后再试: {str(e)}")
+        error_msg = f"翻译失败，请稍后再试: {str(e)}"
+        if update.callback_query:
+            await update.callback_query.message.reply_text(error_msg)
+        else:
+            await update.message.reply_text(error_msg)
 
 async def cut_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/cut 命令：手动切分句子为单词按钮"""

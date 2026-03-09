@@ -5,6 +5,7 @@ import database as db
 import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from logger_config import logger
 
 async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """获取今日学习词汇 (支持自定义数量)
@@ -27,10 +28,10 @@ async def daily_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"正在为你生成 {count} 个今日词汇，请稍候...")
     try:
         words = await vocab_manager.generate_daily_task(user_id, count=count)
-        msg = "📅 **今日词汇**\n\n"
+        msg = "📅 【今日词汇】\n\n"
         for w, definition in words:
-            msg += f"• **{w}**: {definition}\n"
-        await update.message.reply_text(msg, parse_mode="Markdown")
+            msg += f"• 【{w}】: {definition}\n"
+        await update.message.reply_text(msg)
     except Exception as e:
         await update.message.reply_text(f"生成失败: {e}")
 
@@ -72,43 +73,29 @@ async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.save_user_plan(user_id, json.dumps(plan))
             
             # Format output
-            msg = "📅 **7 日学习计划**\n\n"
+            msg = "📅 【7 日学习计划】\n\n"
             if "days" in plan:
                 for day in plan["days"]:
-                    msg += f"**Day {day.get('day')}**\n"
+                    msg += f"Day {day.get('day')}\n"
                     msg += f"• 新词: {day.get('new_words')} | 复习: {day.get('review')}\n"
                     msg += f"• 预计: {day.get('minutes')}分钟\n"
                     msg += f"• 重点: {day.get('focus')}\n\n"
             else:
                 msg = str(plan)
                 
-            await update.message.reply_text(msg, parse_mode="Markdown")
+            await update.message.reply_text(msg)
         else:
             await update.message.reply_text("生成计划失败，AI 未返回有效格式。")
     except Exception as e:
         await update.message.reply_text(f"计划生成出错: {e}")
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """查看详细单词统计"""
-    user_id = update.effective_user.id
-    total, items = db.get_user_word_stats(user_id, limit=10)
-    
-    msg = f"📊 **单词统计 (Total: {total})**\n\n"
-    if not items:
-        msg += "暂无学习记录。"
-    else:
-        for word, last_review, review_count, mastery in items:
-            # last_review might be a string or datetime object depending on sqlite adapter
-            # assuming string for simplicity in display or let's slice it
-            last_date = str(last_review)[:10]
-            msg += f"• **{word}**: 熟练度 {mastery:.1f} | 复习 {review_count}次 | 上次 {last_date}\n"
-            
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    """查看单词统计 (已合并至 /words)"""
+    return await words_command(update, context)
 
 async def words_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """查看历史单词列表"""
+    """查看历史单词列表 (带详细统计)"""
     user_id = update.effective_user.id
-    # Default page 1
     page = 1
     if context.args:
         try:
@@ -120,7 +107,7 @@ async def words_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _show_words_page(update, user_id, page)
 
 async def _show_words_page(update, user_id, page):
-    limit = 20
+    limit = 15 # 每页显示 15 个，保证手机端体验
     offset = (page - 1) * limit
     total, items = db.get_user_word_stats(user_id, offset=offset, limit=limit)
     
@@ -128,15 +115,16 @@ async def _show_words_page(update, user_id, page):
     if total_pages == 0: total_pages = 1
     if page > total_pages: page = total_pages
     
-    msg = f"📚 **历史单词本 (第 {page}/{total_pages} 页)**\nTotal: {total}\n\n"
+    msg = f"� 【词汇统计与历史】 (第 {page}/{total_pages} 页)\n总计收藏: {total}\n\n"
     if not items:
-        msg += "本页无数据。"
+        msg += "暂无单词记录。"
     else:
         for word, last_review, review_count, mastery in items:
-            last_date = str(last_review)[:10] if last_review else "New"
-            msg += f"• **{word}**: Lv.{mastery:.1f} ({last_date})\n"
+            last_date = str(last_review)[:10] if last_review else "新加入"
+            # 合并 stats 的详细信息
+            msg += f"• 【{word}】: Lv.{mastery:.1f} | 复习 {review_count}次 | 上次 {last_date}\n"
             
-    # Pagination Buttons
+    # 分页按钮
     buttons = []
     if page > 1:
         buttons.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"words_page:{page-1}"))
@@ -146,9 +134,9 @@ async def _show_words_page(update, user_id, page):
     keyboard = InlineKeyboardMarkup([buttons]) if buttons else None
     
     if update.callback_query:
-        await update.callback_query.edit_message_text(msg, reply_markup=keyboard, parse_mode="Markdown")
+        await update.callback_query.edit_message_text(msg, reply_markup=keyboard)
     else:
-        await update.message.reply_text(msg, reply_markup=keyboard, parse_mode="Markdown")
+        await update.message.reply_text(msg, reply_markup=keyboard)
 
 async def import_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/import 智能提取重点词汇
@@ -196,9 +184,8 @@ async def import_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             buttons.append(row)
             
         await update.message.reply_text(
-            f"🔍 **已提取 {len(words_data)} 个重点词汇**：\n点击下方按钮添加至生词本。",
-            reply_markup=InlineKeyboardMarkup(buttons),
-            parse_mode="Markdown"
+            f"🔍 【已提取 {len(words_data)} 个重点词汇】\n点击下方按钮添加至生词本。",
+            reply_markup=InlineKeyboardMarkup(buttons)
         )
         
     except Exception as e:
@@ -214,7 +201,7 @@ async def detail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         detail = await ai_service.get_word_detail(word)
         if not detail:
             ipa = await ai_service.get_ipa(word)
-            msg = f"📘 **{word}**\nUK: {ipa.get('uk')}\nUS: {ipa.get('us')}"
+            msg = f"📘 【{word}】\nUK: {ipa.get('uk')}\nUS: {ipa.get('us')}"
         else:
             uk = detail.get("uk_ipa") or ""
             us = detail.get("us_ipa") or ""
@@ -222,13 +209,13 @@ async def detail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             examples = detail.get("examples") or []
             syns = detail.get("synonyms") or []
             ants = detail.get("antonyms") or []
-            msg = f"📘 **{word}**\nUK: {uk}\nUS: {us}\n\n释义：\n"
+            msg = f"📘 【{word}】\nUK: {uk}\nUS: {us}\n\n【释义】\n"
             for m in meanings[:6]:
                 msg += f"- {m.get('pos','')}: {m.get('cn','')}\n"
             if detail.get("gerund"):
                 msg += f"\n动名词：{detail.get('gerund')}\n"
             if examples:
-                msg += "\n例句：\n"
+                msg += "\n【例句】\n"
                 for ex in examples[:3]:
                     msg += f"- {ex.get('en','')}\n  {ex.get('cn','')}\n"
             if syns:
@@ -242,7 +229,7 @@ async def detail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ],
             [InlineKeyboardButton(f"添加到单词表", callback_data=f"add_vocab:{word}")]
         ]
-        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
         await update.message.reply_text(f"失败：{e}")
 
@@ -272,9 +259,9 @@ async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phonetic = word_data[2]
     # definition = word_data[3] # 此时不显示释义
     
-    msg = f"📝 **复习**\n\n**{word}**\n{phonetic}\n\n(思考一下含义...)"
+    msg = f"📝 【复习】\n\n【{word}】\n{phonetic}\n\n(思考一下含义...)"
     keyboard = [[InlineKeyboardButton("显示答案", callback_data=f"review:show:{vocab_id}")]]
-    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def on_vocab_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理词汇相关的按钮回调
@@ -328,7 +315,7 @@ async def on_vocab_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         definition = vocab[3]
-        msg = f"📖 **{vocab[1]}**\n{vocab[2]}\n\n释义：{definition}\n\n请评价你的记忆情况："
+        msg = f"📖 【{vocab[1]}】\n{vocab[2]}\n\n释义：{definition}\n\n请评价你的记忆情况："
         keyboard = [
             [
                 InlineKeyboardButton("忘记 (1)", callback_data=f"review:rate:{vocab_id}:1"),
@@ -340,7 +327,7 @@ async def on_vocab_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("极好 (5)", callback_data=f"review:rate:{vocab_id}:5"),
             ]
         ]
-        await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
         
     elif data.startswith("review:rate:"):
         parts = data.split(":")
@@ -361,9 +348,9 @@ async def on_vocab_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             word = word_data[1]
             phonetic = word_data[2]
             
-            msg = f"📝 **复习**\n\n**{word}**\n{phonetic}\n\n(思考一下含义...)"
+            msg = f"📝 【复习】\n\n【{word}】\n{phonetic}\n\n(思考一下含义...)"
             keyboard = [[InlineKeyboardButton("显示答案", callback_data=f"review:show:{vocab_id}")]]
-            try: await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+            try: await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
             except telegram.error.BadRequest: pass
                 
     elif data.startswith("words_page:"):
@@ -372,9 +359,12 @@ async def on_vocab_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("corr:"):
         w = data.split(":", 1)[1]
         try:
-            await query.message.reply_text(w)
-        except Exception:
-            pass
+            # 调用核心翻译逻辑进行跳转
+            from handlers.basic_handlers import process_translation
+            await process_translation(update, context, w)
+        except Exception as e:
+            logger.error(f"Error in corr callback: {e}")
+            await query.message.reply_text(f"无法翻译：{w}")
     elif data.startswith("ipa:"):
         parts = data.split(":")
         accent = parts[1]
@@ -382,7 +372,7 @@ async def on_vocab_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ipa = await ai_service.get_ipa(w)
         uk = ipa.get("uk") or ""
         us = ipa.get("us") or ""
-        msg = f"📘 **{w}**\nUK: {uk}\nUS: {us}"
+        msg = f"📘 【{w}】\nUK: {uk}\nUS: {us}"
         try:
             await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([
                 [
@@ -390,6 +380,6 @@ async def on_vocab_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     InlineKeyboardButton("美音", callback_data=f"ipa:us:{w}")
                 ],
                 [InlineKeyboardButton(f"添加到单词表", callback_data=f"add_vocab:{w}")]
-            ]), parse_mode="Markdown")
+            ]))
         except telegram.error.BadRequest:
             pass

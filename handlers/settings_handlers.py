@@ -8,11 +8,12 @@ DEFAULT_MODE = "bing"
 DEFAULT_COUNT = True
 DEFAULT_AUTO_CUT = False
 
-ENGINES = ["bing", "google", "deepseek"]
+ENGINES = ["bing", "google", "deepseek", "deepseek_fuzzy"]
 ENGINE_NAMES = {
     "bing": "必应",
     "google": "谷歌",
-    "deepseek": "DeepSeek"
+    "deepseek": "DeepSeek",
+    "deepseek_fuzzy": "DeepSeek (模糊匹配)"
 }
 
 async def setlang(update: Update, context: ContextTypes.DEFAULT_TYPE):

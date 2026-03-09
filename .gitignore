@@ -22,6 +22,12 @@ venv.bak/
 .env.test.local
 .env.production.local
 
+# Secrets
+*.key
+*.pem
+config.secret.*
+secrets/
+
 # Logs
 logs/
 *.log
@@ -34,3 +40,6 @@ yarn-error.log*
 .idea/
 *.swp
 *.swo
+
+
+bot.log

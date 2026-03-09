@@ -60,6 +60,7 @@ async def main():
     
     # 注册基础命令
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", start))
     app.add_handler(CommandHandler("cut", cut_command))
     app.add_handler(CommandHandler("chat", chat_command))
     
