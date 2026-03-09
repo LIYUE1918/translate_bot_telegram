@@ -34,8 +34,10 @@ from handlers.learning_handlers import (
     stats_command,
     words_command,
     import_command,
-    on_vocab_callback
+    on_vocab_callback,
+    detail_command
 )
+from handlers.basic_handlers import chat_command
 
 # Initialize Database
 db.init_db()
@@ -59,6 +61,7 @@ async def main():
     # 注册基础命令
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cut", cut_command))
+    app.add_handler(CommandHandler("chat", chat_command))
     
     # 注册设置相关命令与回调
     app.add_handler(CommandHandler("settings", settings))
@@ -75,7 +78,8 @@ async def main():
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("words", words_command))
     app.add_handler(CommandHandler("import", import_command))
-    app.add_handler(CallbackQueryHandler(on_vocab_callback, pattern="^(add_vocab|close_keyboard|review:|words_page:)"))
+    app.add_handler(CommandHandler("detail", detail_command))
+    app.add_handler(CallbackQueryHandler(on_vocab_callback, pattern="^(add_vocab|close_keyboard|review:|words_page:|corr:|ipa:)"))
     
     # 注册文本消息处理器（最后注册，避免拦截命令）
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))

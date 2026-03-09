@@ -12,6 +12,28 @@ from logger_config import logger
 
 # Auth Key
 AUTH_KEY = "芝麻开门"
+# 将英文单词还原为词根（词干）形式，用于在生词本中做模糊匹配
+def _morphological_base(w):
+    wl = w.lower()
+    if len(wl) <= 3:
+        return wl
+    if wl.endswith("ies") and len(wl) > 4:
+        return wl[:-3] + "y"
+    if wl.endswith("es") and len(wl) > 3:
+        return wl[:-2]
+    if wl.endswith("s") and len(wl) > 3:
+        return wl[:-1]
+    if wl.endswith("ing") and len(wl) > 5:
+        base = wl[:-3]
+        if base.endswith(base[-1]):
+            base = base[:-1]
+        return base
+    if wl.endswith("ed") and len(wl) > 4:
+        base = wl[:-2]
+        if base.endswith(base[-1]):
+            base = base[:-1]
+        return base
+    return wl
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/start 命令处理器：收到 /start 时发送欢迎语"""
@@ -81,6 +103,35 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     auto_cut = context.user_data.get("auto_cut", DEFAULT_AUTO_CUT)
     
     try:
+        tokens = re.findall(r'^[a-zA-Z\-]+$', text.strip())
+        if tokens and len(tokens) == 1:
+            word = tokens[0]
+            vocab = db.get_vocab_by_word(word)
+            if not vocab:
+                base = _morphological_base(word)
+                if db.get_vocab_by_word(base):
+                    vocab = db.get_vocab_by_word(base)
+                else:
+                    fm = await ai_service.fuzzy_match_word(word)
+                    best = fm.get("best", {})
+                    cands = fm.get("candidates", []) or []
+                    items = [best] + cands
+                    buttons = []
+                    rows = []
+                    for item in items[:5]:
+                        w = item.get("word") or word
+                        rows.append(InlineKeyboardButton(f"{w}", callback_data=f"corr:{w}"))
+                        if len(rows) == 3:
+                            buttons.append(rows)
+                            rows = []
+                    if rows:
+                        buttons.append(rows)
+                    msg = "您输入的单词： " + word + "\n是否想查找：\n"
+                    for i, item in enumerate(items[:5], start=1):
+                        pct = int((item.get("confidence") or 0) * 100)
+                        msg += f"• {item.get('word')} ({pct}% 匹配)\n"
+                    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons))
+                    return
         start_time = time.perf_counter()
         if engine == "deepseek":
             res = await ai_service.ai_translate(text, target_lang=tgt)
@@ -194,3 +245,21 @@ async def _process_difficult_words(user_id, text, update):
             pass
     except Exception as e:
         logger.error(f"Error processing difficult words: {e}", exc_info=True)
+
+async def chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not context.args and not (update.message.reply_to_message and update.message.reply_to_message.text):
+        await update.message.reply_text("用法：/chat 单词 或 回复一条包含单词的消息")
+        return
+    query = " ".join(context.args) if context.args else update.message.reply_to_message.text.strip()
+    try:
+        placeholder = await update.message.reply_text("正在生成...")
+        async def run():
+            resp = await ai_service.chat_word(user_id, query)
+            try:
+                await placeholder.edit_text(resp)
+            except Exception:
+                await update.message.reply_text(resp)
+        asyncio.create_task(run())
+    except Exception as e:
+        await update.message.reply_text(f"失败：{e}")

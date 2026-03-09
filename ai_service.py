@@ -270,3 +270,92 @@ async def generate_words_custom(count, source="system", level_filter="CET-6"):
     One per line.
     """
     return await get_ai_response(0, prompt, temperature=0.7)
+
+async def fuzzy_match_word(word, max_candidates=5):
+    prompt = f"""
+    You are an English spell-correction assistant.
+    Input: "{word}"
+    Return strict JSON:
+    {{
+      "input": "{word}",
+      "best": {{"word": "...", "confidence": 0.0, "pos": "..."}},
+      "candidates": [
+        {{"word": "...", "confidence": 0.0, "pos": "..."}}
+      ]
+    }}
+    Rules:
+    - Confidence is 0-1.
+    - Include up to {max_candidates} candidates sorted by confidence desc.
+    - Treat inflected forms (past tense, -ed, -ing, plural) as valid, not errors.
+    - If input is valid word, set best.word=input with high confidence and candidates possibly empty.
+    Only output JSON.
+    """
+    resp = await get_ai_response(0, prompt, system_prompt="You correct spelling and return JSON.", temperature=0.0)
+    try:
+        clean = resp.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean)
+        return data
+    except Exception:
+        return {"input": word, "best": {"word": word, "confidence": 0.99, "pos": ""}, "candidates": []}
+
+async def get_word_detail(word):
+    prompt = f"""
+    Provide detailed information for the English word: {word}
+    Include:
+    - Full meanings with parts of speech in Chinese
+    - Gerund/participles or verbal noun forms if applicable
+    - 3 example sentences (English) with Chinese translations
+    - 3 synonyms and 3 antonyms
+    - IPA for UK and US as uk_ipa and us_ipa
+    Return strict JSON:
+    {{
+      "word":"{word}",
+      "uk_ipa":"...",
+      "us_ipa":"...",
+      "meanings":[{{"pos":"...", "cn":"..."}}],
+      "gerund":"...",
+      "examples":[{{"en":"...", "cn":"..."}}],
+      "synonyms":["..."],
+      "antonyms":["..."]
+    }}
+    Only output JSON.
+    """
+    resp = await get_ai_response(0, prompt, system_prompt="You are a lexicon expert returning JSON.", temperature=0.2)
+    try:
+        clean = resp.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean)
+        return data
+    except Exception:
+        return None
+
+async def chat_word(user_id, text):
+    prompt = f"""
+    User asks about: {text}
+    Provide:
+    - Memory techniques tailored to the word
+    - 2 concise example sentences (EN) with Chinese translations
+    - Root and affix analysis
+    Keep under 120 words.
+    """
+    return await get_ai_response(user_id, prompt, system_prompt="You are a concise vocabulary tutor.", model=DEFAULT_MODEL, temperature=0.5)
+
+async def get_ipa(word):
+    async def cambridge_ipa(w, accent):
+        return None
+    detail = await get_word_detail(word)
+    if detail and detail.get("uk_ipa") and detail.get("us_ipa"):
+        return {"uk": detail.get("uk_ipa"), "us": detail.get("us_ipa")}
+    uk_try = await cambridge_ipa(word, "uk")
+    us_try = await cambridge_ipa(word, "us")
+    if uk_try or us_try:
+        return {"uk": uk_try or "", "us": us_try or ""}
+    prompt = f"Provide UK and US IPA for the word '{word}' as JSON {{\"uk\":\"/.../\",\"us\":\"/.../\"}}. Only JSON."
+    resp = await get_ai_response(0, prompt, system_prompt="Return IPA JSON only.", temperature=0.0)
+    try:
+        clean = resp.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean)
+        uk = data.get("uk") or data.get("uk_ipa") or ""
+        us = data.get("us") or data.get("us_ipa") or ""
+        return {"uk": uk, "us": us}
+    except Exception:
+        return {"uk": "", "us": ""}

@@ -204,6 +204,48 @@ async def import_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"提取失败: {e}")
 
+async def detail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not context.args and not (update.message.reply_to_message and update.message.reply_to_message.text):
+        await update.message.reply_text("用法：/detail 单词 或 回复一条包含单词的消息")
+        return
+    word = " ".join(context.args) if context.args else update.message.reply_to_message.text.strip()
+    try:
+        detail = await ai_service.get_word_detail(word)
+        if not detail:
+            ipa = await ai_service.get_ipa(word)
+            msg = f"📘 **{word}**\nUK: {ipa.get('uk')}\nUS: {ipa.get('us')}"
+        else:
+            uk = detail.get("uk_ipa") or ""
+            us = detail.get("us_ipa") or ""
+            meanings = detail.get("meanings") or []
+            examples = detail.get("examples") or []
+            syns = detail.get("synonyms") or []
+            ants = detail.get("antonyms") or []
+            msg = f"📘 **{word}**\nUK: {uk}\nUS: {us}\n\n释义：\n"
+            for m in meanings[:6]:
+                msg += f"- {m.get('pos','')}: {m.get('cn','')}\n"
+            if detail.get("gerund"):
+                msg += f"\n动名词：{detail.get('gerund')}\n"
+            if examples:
+                msg += "\n例句：\n"
+                for ex in examples[:3]:
+                    msg += f"- {ex.get('en','')}\n  {ex.get('cn','')}\n"
+            if syns:
+                msg += "\n近义词： " + ", ".join(syns[:3]) + "\n"
+            if ants:
+                msg += "反义词： " + ", ".join(ants[:3]) + "\n"
+        buttons = [
+            [
+                InlineKeyboardButton("英音", callback_data=f"ipa:uk:{word}"),
+                InlineKeyboardButton("美音", callback_data=f"ipa:us:{word}")
+            ],
+            [InlineKeyboardButton(f"添加到单词表", callback_data=f"add_vocab:{word}")]
+        ]
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons), parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"失败：{e}")
+
 async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """开始复习生词
     
@@ -327,3 +369,27 @@ async def on_vocab_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("words_page:"):
         page = int(data.split(":")[1])
         await _show_words_page(update, user_id, page)
+    elif data.startswith("corr:"):
+        w = data.split(":", 1)[1]
+        try:
+            await query.message.reply_text(w)
+        except Exception:
+            pass
+    elif data.startswith("ipa:"):
+        parts = data.split(":")
+        accent = parts[1]
+        w = parts[2]
+        ipa = await ai_service.get_ipa(w)
+        uk = ipa.get("uk") or ""
+        us = ipa.get("us") or ""
+        msg = f"📘 **{w}**\nUK: {uk}\nUS: {us}"
+        try:
+            await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("英音", callback_data=f"ipa:uk:{w}"),
+                    InlineKeyboardButton("美音", callback_data=f"ipa:us:{w}")
+                ],
+                [InlineKeyboardButton(f"添加到单词表", callback_data=f"add_vocab:{w}")]
+            ]), parse_mode="Markdown")
+        except telegram.error.BadRequest:
+            pass
