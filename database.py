@@ -20,7 +20,9 @@ DB_FILE = os.getenv("DB_FILE", "vocab_learning.db")
 
 def get_connection():
     """获取数据库连接（连接到项目根目录下的 DB_FILE）"""
-    return sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 def _has_column(cursor, table, column):
     cursor.execute(f"PRAGMA table_info({table})")
@@ -463,6 +465,49 @@ def get_user_word_stats(user_id, offset=0, limit=10):
     items = cursor.fetchall()
     conn.close()
     return total, items
+
+def delete_vocab_containing(text):
+    """删除定义中包含指定文本的词汇（用于清理无效数据）"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    pattern = f"%{text}%"
+    try:
+        # 首先找出涉及的 vocab_id
+        cursor.execute('SELECT id FROM vocabulary WHERE definition LIKE ?', (pattern,))
+        ids = [row[0] for row in cursor.fetchall()]
+        
+        if ids:
+            placeholders = ','.join('?' * len(ids))
+            # 删除学习记录
+            cursor.execute(f'DELETE FROM learning_records WHERE vocab_id IN ({placeholders})', ids)
+            # 删除词汇
+            cursor.execute(f'DELETE FROM vocabulary WHERE id IN ({placeholders})', ids)
+            conn.commit()
+            return len(ids)
+        return 0
+    finally:
+        conn.close()
+
+def delete_vocab_by_date(start_date, end_date):
+    """删除指定日期范围内添加的词汇"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # 找出该时间段内添加的词汇
+        cursor.execute('SELECT id FROM vocabulary WHERE added_at BETWEEN ? AND ?', (start_date, end_date))
+        ids = [row[0] for row in cursor.fetchall()]
+        
+        if ids:
+            placeholders = ','.join('?' * len(ids))
+            # 删除学习记录
+            cursor.execute(f'DELETE FROM learning_records WHERE vocab_id IN ({placeholders})', ids)
+            # 删除词汇
+            cursor.execute(f'DELETE FROM vocabulary WHERE id IN ({placeholders})', ids)
+            conn.commit()
+            return len(ids)
+        return 0
+    finally:
+        conn.close()
 
 # AI Logs
 def log_ai_interaction(user_id, query, response, model):

@@ -233,6 +233,28 @@ async def detail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"失败：{e}")
 
+async def clean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """清理词汇命令
+    用法：
+    /clean - 清理包含 'rate limit' 错误的无效词汇
+    /clean [天数] - 清理最近 N 天添加的词汇 (如 /clean 7)
+    """
+    args = context.args
+    try:
+        if not args:
+            # Default: clean bad vocab
+            count = vocab_manager.clean_bad_vocab()
+            await update.message.reply_text(f"✅ 已清理 {count} 条包含错误信息(Rate Limit)的无效词汇。")
+        elif args[0].isdigit():
+            days = int(args[0])
+            count = vocab_manager.clean_vocab_by_date(days)
+            await update.message.reply_text(f"🗑️ 已删除最近 {days} 天添加的所有词汇（共 {count} 条）。")
+        else:
+            await update.message.reply_text("⚠️ 参数错误。\n用法：\n/clean - 清理错误数据\n/clean 7 - 清理最近 7 天数据")
+    except Exception as e:
+        logger.error(f"Clean command error: {e}")
+        await update.message.reply_text(f"❌ 清理失败: {e}")
+
 async def review_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """开始复习生词
     

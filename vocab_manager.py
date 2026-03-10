@@ -52,6 +52,11 @@ async def add_word(user_id, word):
         # Use AI to get definition and phonetic
         prompt = f"Provide the phonetic transcription and a brief definition (in Chinese) for the word '{word}'. Format: Phonetic | Definition"
         ai_resp = await ai_service.get_ai_response(user_id, prompt)
+        
+        # Check for rate limit or error messages in response
+        if "rate limit" in ai_resp.lower() or "too many requests" in ai_resp.lower():
+            raise Exception("AI Service Rate Limit (Upstream). Please try again later.")
+            
         try:
             parts = ai_resp.split("|")
             phonetic = parts[0].strip()
@@ -59,6 +64,9 @@ async def add_word(user_id, word):
         except:
             phonetic = ""
             definition = ai_resp
+            
+        if "rate limit" in definition.lower():
+             raise Exception("AI Service Rate Limit (Content). Please try again later.")
             
         vocab_id = db.add_vocabulary(word, phonetic, definition)
     else:
@@ -161,8 +169,31 @@ async def process_text_for_difficult_words(user_id, text, min_level=6, max_new_w
         ))
         
     added_count = db.batch_add_vocabulary(db_words_data)
+
     
     # 记录审计日志
     db.log_vocab_add_batch(text, "ai-extract", len(words))
     
     return len(words)
+
+def clean_bad_vocab():
+    """清理因上游限流导致的无效词汇"""
+    count = db.delete_vocab_containing("rate limit")
+    count += db.delete_vocab_containing("too many requests")
+    count += db.delete_vocab_containing("429")
+    return count
+
+def clean_vocab_by_date(days=None):
+    """清理指定天数内的词汇（默认为全部）"""
+    if days is None:
+        # Delete all? Or maybe just recent ones? 
+        # User said "一段时间的单词", so let's default to 7 days if not specified or handle logic in handler
+        pass
+    
+    start_date = datetime.min
+    end_date = datetime.now()
+    
+    if days:
+        start_date = datetime.now() - timedelta(days=days)
+        
+    return db.delete_vocab_by_date(start_date, end_date)

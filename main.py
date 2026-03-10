@@ -11,6 +11,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
+from telegram import BotCommand
 import database as db
 from logger_config import setup_logger
 
@@ -35,7 +36,8 @@ from handlers.learning_handlers import (
     words_command,
     import_command,
     on_vocab_callback,
-    detail_command
+    detail_command,
+    clean_command
 )
 from handlers.basic_handlers import chat_command
 
@@ -80,6 +82,7 @@ async def main():
     app.add_handler(CommandHandler("words", words_command))
     app.add_handler(CommandHandler("import", import_command))
     app.add_handler(CommandHandler("detail", detail_command))
+    app.add_handler(CommandHandler("clean", clean_command))
     app.add_handler(CallbackQueryHandler(on_vocab_callback, pattern="^(add_vocab|close_keyboard|review:|words_page:|corr:|ipa:)"))
     
     # 注册文本消息处理器（最后注册，避免拦截命令）
@@ -87,6 +90,24 @@ async def main():
     
     # 初始化与启动
     await app.initialize()
+    
+    # 设置 Bot 菜单
+    commands = [
+        BotCommand("start", "开始使用 / 帮助"),
+        BotCommand("daily", "获取今日学习词汇"),
+        BotCommand("review", "开始复习生词"),
+        BotCommand("words", "查看单词本与统计"),
+        BotCommand("plan", "查看学习计划"),
+        BotCommand("summary", "查看学习进度总结"),
+        BotCommand("detail", "查看单词详情"),
+        BotCommand("cut", "切分文本为按钮"),
+        BotCommand("import", "智能提取重点词汇"),
+        BotCommand("clean", "清理无效或旧词汇"),
+        BotCommand("chat", "询问 AI 助手"),
+        BotCommand("settings", "打开设置面板"),
+    ]
+    await app.bot.set_my_commands(commands)
+    
     await app.start()
     logger.info("Bot started. Press Ctrl+C to stop.")
     
