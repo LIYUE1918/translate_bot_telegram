@@ -42,4 +42,5 @@ yarn-error.log*
 *.swo
 
 
-bot.log
+bot.logvocab_learning.db
+logs/
