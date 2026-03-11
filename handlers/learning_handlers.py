@@ -115,7 +115,7 @@ async def _show_words_page(update, user_id, page):
     if total_pages == 0: total_pages = 1
     if page > total_pages: page = total_pages
     
-    msg = f"� 【词汇统计与历史】 (第 {page}/{total_pages} 页)\n总计收藏: {total}\n\n"
+    msg = f"📊 【词汇统计与历史】 (第 {page}/{total_pages} 页)\n总计收藏: {total}\n\n"
     if not items:
         msg += "暂无单词记录。"
     else:
@@ -134,9 +134,18 @@ async def _show_words_page(update, user_id, page):
     keyboard = InlineKeyboardMarkup([buttons]) if buttons else None
     
     if update.callback_query:
-        await update.callback_query.edit_message_text(msg, reply_markup=keyboard)
+        try:
+            await update.callback_query.edit_message_text(msg, reply_markup=keyboard)
+        except telegram.error.BadRequest:
+            try:
+                await update.callback_query.message.reply_text(msg, reply_markup=keyboard)
+            except Exception:
+                pass
     else:
-        await update.message.reply_text(msg, reply_markup=keyboard)
+        try:
+            await update.message.reply_text(msg, reply_markup=keyboard)
+        except Exception:
+            pass
 
 async def import_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/import 智能提取重点词汇

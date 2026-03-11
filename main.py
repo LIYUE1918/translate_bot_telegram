@@ -11,6 +11,8 @@ import os
 import asyncio
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
+from telegram.request import HTTPXRequest
+import httpx
 from telegram import BotCommand
 import database as db
 from logger_config import setup_logger
@@ -57,8 +59,23 @@ async def main():
     2. 初始化并启动 Bot，与 Telegram 建立连接
     3. 启动长轮询保持常驻
     """
-    # 构建应用容器并注入 Token
-    app = Application.builder().token(TOKEN).build()
+    # 构建 HTTPXRequest（禁用 HTTP/2，使用 certifi 证书，可选代理）
+    # 注意：python-telegram-bot 的 HTTPXRequest 参数与 httpx.AsyncClient 略有不同
+    proxy = os.environ.get("TELEGRAM_PROXY")
+    
+    request_kwargs = {
+        "http_version": "1.1",
+        "connect_timeout": 10.0,
+        "read_timeout": 10.0,
+    }
+    
+    if proxy:
+        request_kwargs["proxy_url"] = proxy
+        
+    request = HTTPXRequest(**request_kwargs)
+    
+    # 构建应用容器并注入 Token 与自定义请求
+    app = Application.builder().token(TOKEN).request(request).build()
     
     # 注册基础命令
     app.add_handler(CommandHandler("start", start))

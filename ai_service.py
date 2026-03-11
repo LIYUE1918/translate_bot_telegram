@@ -10,6 +10,8 @@
 """
 import os
 import aiohttp
+import ssl
+import certifi
 import asyncio
 import json
 import time
@@ -42,6 +44,13 @@ def get_api_key():
     """
     return os.environ.get("AI_API_KEY")
 
+def _get_ssl_connector():
+    try:
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        return aiohttp.TCPConnector(ssl=ctx)
+    except Exception:
+        return aiohttp.TCPConnector()
+
 async def call_ai_api(messages, model=DEFAULT_MODEL, temperature=0.7, max_tokens=1000):
     """底层请求函数：调用 302.AI Chat Completions
 
@@ -70,16 +79,28 @@ async def call_ai_api(messages, model=DEFAULT_MODEL, temperature=0.7, max_tokens
         "max_tokens": max_tokens
     }
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=_get_ssl_connector()) as session:
         try:
             async with session.post(API_BASE_URL, headers=headers, json=payload) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"AI API Error: {response.status} - {error_text}")
                     return f"AI Service Error: {response.status}"
-                
                 data = await response.json()
                 return data['choices'][0]['message']['content']
+        except aiohttp.ClientError as e:
+            await asyncio.sleep(0.5)
+            try:
+                async with session.post(API_BASE_URL, headers=headers, json=payload) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"AI API Error: {response.status} - {error_text}")
+                        return f"AI Service Error: {response.status}"
+                    data = await response.json()
+                    return data['choices'][0]['message']['content']
+            except Exception as e2:
+                logger.error(f"AI Request Failed: {e2}")
+                return f"AI Request Failed: {str(e2)}"
         except Exception as e:
             logger.error(f"AI Request Failed: {e}")
             return f"AI Request Failed: {str(e)}"
