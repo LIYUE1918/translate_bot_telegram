@@ -86,7 +86,8 @@ AI_API_KEY=你的302.AI API Key
 ```bash
 python main.py
 ```
-
+5. telegram
+   连接机器人，通常机器人会让你输入密钥，密钥为芝麻开门
 ### Docker 部署
 ```bash
 docker-compose up -d --build
